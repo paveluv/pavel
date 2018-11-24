@@ -1,5 +1,19 @@
 {-# LANGUAGE CApiFFI #-}
 
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  Pavel.Xnu.AttrList
+-- Copyright   :  (c) Pavel Uvarov 2018
+-- License     :  BSD-style (see the file LICENSE)
+--
+-- Maintainer  :  puvar@puvar.net
+-- Stability   :  experimental
+-- Portability :  non-portable (requires Darwin OS)
+--
+-- Support for getattrlist system call.
+--
+-----------------------------------------------------------------------------
+
 module Pavel.Xnu.AttrList
   ( AttrList(..)
   , AttrCmn(..)
@@ -14,9 +28,9 @@ import Foreign.C.String
 import Foreign.C.Types
 import System.Posix.Internals
 
+import Pavel.EnumBitFlags
 import Pavel.Xnu.AttrList.AttrCmn
 import Pavel.Xnu.AttrList.Peekery
-import Pavel.Xnu.EnumBitFlags
 import Pavel.Xnu.Types
 
 #include <sys/attr.h>

@@ -1,4 +1,4 @@
-module Pavel.Xnu.EnumBitFlags where
+module Pavel.EnumBitFlags where
 
 import Data.Bits
 import Foreign.Ptr

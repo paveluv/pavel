@@ -1,8 +1,8 @@
 module Main where
 
 import Control.Monad
+import Pavel.EnumBitFlags
 import Pavel.Xnu.AttrList
-import Pavel.Xnu.EnumBitFlags
 import Pavel.Xnu.Types
 import System.Environment
 
