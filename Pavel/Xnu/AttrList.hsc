@@ -29,13 +29,16 @@ import Foreign.C.Types
 import System.Posix.Internals
 
 import Pavel.EnumBitFlags
+import Pavel.SafeBuf
 import Pavel.Xnu.AttrList.AttrCmn
-import Pavel.Xnu.AttrList.Peekery
 import Pavel.Xnu.Types
 
 #include <sys/attr.h>
 #include <unistd.h>
 
+-- | @struct attrlist@ from @sys/attr.h@. Used as an argument to @getattrlist@
+-- system call.
+-- Only common attributes for now...
 data AttrList = AttrList
   { commonAttr :: [AttrCmn]
   }
@@ -68,6 +71,7 @@ foreign import capi unsafe "unistd.h getattrlist" c_getattrlist ::
 
 type FsOpts = EnumBitFlags CULong FsOpt
 
+-- | Make @getattrlist@ system call, and return interpreted results.
 getAttrList :: FsOpts -> AttrList -> FilePath -> IO [AttrCmnValue]
 getAttrList opts attrList path =
   withFilePath path $ \cPath -> do
@@ -75,10 +79,9 @@ getAttrList opts attrList path =
       result <- go cPath pAttrList 8
       case result of
         Left size -> do
-          putStrLn "buffer realloc"
           result' <- go cPath pAttrList size
           case result' of
-            Left _ -> ioError $ userError "error after buffer realloc"
+            Left _ -> error "error after buffer realloc"
             Right ret -> return ret
         Right ret -> return ret
   where
@@ -89,7 +92,7 @@ getAttrList opts attrList path =
           "getAttrList"
           path
           (c_getattrlist
-            cPath pAttrList pAttrBuf (toEnum bufSize) (foldEnumBitFlags opts))
+            cPath pAttrList pAttrBuf (toEnum bufSize) (packEnumBitFlags opts))
         (size :: Int) <-
           (fromIntegral <$> peek ((castPtr pAttrBuf) :: Ptr Word32))
         if size > bufSize
@@ -98,4 +101,4 @@ getAttrList opts attrList path =
           else
             Right <$> peekAttrCmns
               (sort $ commonAttr attrList)
-              ((pAttrBuf, size) `advanceBuf` 4)
+              (Buf (pAttrBuf `plusPtr` 4) (size - 4))

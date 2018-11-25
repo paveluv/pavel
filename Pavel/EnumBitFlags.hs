@@ -31,14 +31,14 @@ instance Foldable (EnumBitFlags w) where
   foldr func acc (EnumBitFlags flags) = foldr func acc flags
 
 -- | Fold the list of flags into a bitmask word.
-foldEnumBitFlags :: (Enum a, Enum w, Bits w) => EnumBitFlags w a -> w
-foldEnumBitFlags (EnumBitFlags flags) =
+packEnumBitFlags :: (Enum a, Enum w, Bits w) => EnumBitFlags w a -> w
+packEnumBitFlags (EnumBitFlags flags) =
   foldr ((.|.) . toEnum . fromEnum) (toEnum 0) flags
 
 -- | Given a bitmask word, generate a list of flags.
-unfoldEnumBitFlags ::
+unpackEnumBitFlags ::
      (Bounded a, Enum a, Enum w, Bits w) => w -> EnumBitFlags w a
-unfoldEnumBitFlags word =
+unpackEnumBitFlags word =
   EnumBitFlags
     [e | e <- [minBound ..], (toEnum $ fromEnum e) .&. word /= (toEnum 0)]
 
@@ -48,5 +48,5 @@ instance (Bounded a, Enum a, Enum w, Bits w, Storable w) =>
   sizeOf _ = sizeOf (undefined :: w)
   alignment _ = alignment (undefined :: w)
   peek ptr = do
-    unfoldEnumBitFlags <$> peek (castPtr ptr :: Ptr w)
-  poke ptr = poke (castPtr ptr :: Ptr w) . foldEnumBitFlags
+    unpackEnumBitFlags <$> peek (castPtr ptr :: Ptr w)
+  poke ptr = poke (castPtr ptr :: Ptr w) . packEnumBitFlags

@@ -1,6 +1,7 @@
 module Pavel.Xnu.Types.CEnums where
 
 #include <sys/attr.h>
+#include <sys/acl.h>
 #include <sys/stat.h>
 #include <sys/vnode.h>
 
@@ -47,4 +48,42 @@ module Pavel.Xnu.Types.CEnums where
   , SF_NOUNLINK as SF_NOUNLINK
   }
   deriving (Bounded, Eq, Read, Show)
+#}
+
+-- | Kauth ACE kind. Stored in first 4 bits (actually 2 bits) of @ace_flags@
+-- field of @struct kauth_ace@.
+-- See @/usr/include/sys/kauth.h@.
+{#enum define AceKind
+  { KAUTH_ACE_PERMIT as KAUTH_ACE_PERMIT
+  , KAUTH_ACE_DENY as KAUTH_ACE_DENY
+  , KAUTH_ACE_AUDIT as KAUTH_ACE_AUDIT  -- "not implemented"
+  , KAUTH_ACE_ALARM as KAUTH_ACE_ALARM  -- "not implemented"
+  }
+#}
+
+-- | Kauth ACE control flags.
+{#enum define AceInheritControl
+  { KAUTH_ACE_FILE_INHERIT as KAUTH_ACE_FILE_INHERIT
+  , KAUTH_ACE_DIRECTORY_INHERIT as KAUTH_ACE_DIRECTORY_INHERIT
+  , KAUTH_ACE_LIMIT_INHERIT as KAUTH_ACE_LIMIT_INHERIT
+  , KAUTH_ACE_ONLY_INHERIT as KAUTH_ACE_ONLY_INHERIT
+  }
+#}
+
+-- | Kauth ACE audit/alarm flags.
+-- "not implemented"
+{#enum define AceAuditAlarm
+  { KAUTH_ACE_SUCCESS as KAUTH_ACE_SUCCESS
+  , KAUTH_ACE_FAILURE as KAUTH_ACE_FAILURE
+  }
+#}
+
+-- | Kauth ACE rights flags.
+-- "never tested, but may be present in an ACL"
+{#enum define AceRights
+  { KAUTH_ACE_GENERIC_ALL as KAUTH_ACE_GENERIC_ALL
+  , KAUTH_ACE_GENERIC_EXECUTE as KAUTH_ACE_GENERIC_EXECUTE
+  , KAUTH_ACE_GENERIC_WRITE as KAUTH_ACE_GENERIC_WRITE
+  , KAUTH_ACE_GENERIC_READ as KAUTH_ACE_GENERIC_READ
+  }
 #}

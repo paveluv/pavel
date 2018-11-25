@@ -3,12 +3,11 @@
 module Pavel.Xnu.AttrList.AttrCmn where
 
 import Control.Monad
-import Data.Bits
-import Data.List
 import Data.Word
-import Foreign.C.String
 import System.Posix.Types
 
+import Pavel.EnumBitFlags
+import Pavel.SafeBuf
 import Pavel.Xnu.Types
 import Pavel.Xnu.AttrList.Peekery
 
@@ -53,7 +52,7 @@ import Pavel.Xnu.AttrList.Peekery
 
 packAttrCmns :: [AttrCmn] -> Word32
 packAttrCmns attrs =
-  foldl' (\acc attr -> (fromIntegral $ fromEnum attr) .|. acc) 0 attrs
+  packEnumBitFlags (EnumBitFlags attrs)
 
 data AttrCmnValue
   = AttrCmnName String
@@ -64,7 +63,7 @@ data AttrCmnValue
   | AttrCmnObjId FsObjId
   | AttrCmnObjPermanentId FsObjId
   | AttrCmnParObjId FsObjId
-  | AttrCmnScript CTextEncoding
+  | AttrCmnScript TextEncoding
   | AttrCmnCrTime TimeSpec
   | AttrCmnModTime TimeSpec
   | AttrCmnChgTime TimeSpec
@@ -77,9 +76,10 @@ data AttrCmnValue
   | AttrCmnFlags FileFlags
   | AttrCmnGenCount Word32
   | AttrCmnDocumentId Word32
+  | AttrCmnExtendedSecurity (Maybe KauthAcl)
   deriving (Show)
 
-peekAttrCmn :: AttrCmn -> CStringLen -> IO (CStringLen, AttrCmnValue)
+peekAttrCmn :: AttrCmn -> AttrListBuf -> IO (AttrListBuf, AttrCmnValue)
 peekAttrCmn ATTR_CMN_NAME = peekStringAttr AttrCmnName
 peekAttrCmn ATTR_CMN_DEVID = peekFixedAttr AttrCmnDevId
 peekAttrCmn ATTR_CMN_FSID = peekFixedAttr AttrCmnFsId
@@ -103,11 +103,13 @@ peekAttrCmn ATTR_CMN_ACCESSMASK = peekFixedAttr AttrCmnAccessMask
 peekAttrCmn ATTR_CMN_FLAGS = peekFixedAttr AttrCmnFlags
 peekAttrCmn ATTR_CMN_GEN_COUNT = peekFixedAttr AttrCmnGenCount
 peekAttrCmn ATTR_CMN_DOCUMENT_ID = peekFixedAttr AttrCmnDocumentId
+peekAttrCmn ATTR_CMN_EXTENDED_SECURITY =
+  peekKauthAclAttr AttrCmnExtendedSecurity
 peekAttrCmn _ = \_ -> ioError $ userError "attr not supported"
 
-peekAttrCmns :: [AttrCmn] -> Buf -> IO [AttrCmnValue]
+peekAttrCmns :: [AttrCmn] -> AttrListBuf -> IO [AttrCmnValue]
 peekAttrCmns attrs buf = do
-  ((_, mustBeZero), ret) <- foldM peekOne (buf, []) attrs
+  (Buf _ mustBeZero, ret) <- foldM peekOne (buf, []) attrs
   if | mustBeZero > 0 -> do
          putStrLn $ (show mustBeZero) ++ " bytes left in buffer!!"
      | mustBeZero < 0 -> do
