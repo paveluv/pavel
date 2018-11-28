@@ -1,15 +1,15 @@
 module Main where
 
-import Control.Monad
-import Pavel.EnumBitFlags
-import Pavel.Xnu.AttrList
-import Pavel.Xnu.Types
-import System.Environment
+import           Control.Monad
+import           Pavel.EnumBitFlags
+import           Pavel.Xnu.AttrList
+import           Pavel.Xnu.Types
+import           System.Environment
 
 main :: IO ()
 main =
   let opts1 = EnumBitFlags [FSOPT_NOFOLLOW, FSOPT_ATTR_CMN_EXTENDED]
-      opts2 = EnumBitFlags [FSOPT_NOFOLLOW]
+      _opts2 = EnumBitFlags [FSOPT_NOFOLLOW]
    in do files <- getArgs
          forM_ files $ \file -> do
            st <-
@@ -19,7 +19,7 @@ main =
                  { commonAttr =
                      [ ATTR_CMN_NAME
 --                     , ATTR_CMN_DEVID
- --                    , ATTR_CMN_FSID
+                     , ATTR_CMN_FSID
  --                    , ATTR_CMN_OBJTYPE
  --                    , ATTR_CMN_OBJTAG
   --                   , ATTR_CMN_OBJID
@@ -32,13 +32,20 @@ main =
   --                   , ATTR_CMN_ACCTIME
   --                   , ATTR_CMN_BKUPTIME
   --                   , ATTR_CMN_FNDRINFO
-  --                   , ATTR_CMN_GRPID
-  --                   , ATTR_CMN_OWNERID
+                     , ATTR_CMN_GRPID
+                     , ATTR_CMN_OWNERID
   --                   , ATTR_CMN_ACCESSMASK
   --                   , ATTR_CMN_FLAGS
                      , ATTR_CMN_GEN_COUNT
   --                   , ATTR_CMN_DOCUMENT_ID
                      , ATTR_CMN_EXTENDED_SECURITY
+                     , ATTR_CMN_UUID
+                     , ATTR_CMN_GRPUUID
+                     , ATTR_CMN_FILEID
+                     , ATTR_CMN_PARENTID
+                     , ATTR_CMN_FULLPATH
+                     , ATTR_CMN_ADDEDTIME
+                     , ATTR_CMN_DATA_PROTECT_FLAGS
                      ]
                  }
                file

@@ -1,8 +1,7 @@
+-- | Helper peek functions.
+
 module Pavel.Xnu.AttrList.Peekery where
 
--------------------------------------------------------------------------------
--- | Helper peek functions.
--------------------------------------------------------------------------------
 import Foreign
 import Foreign.C.String
 

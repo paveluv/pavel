@@ -1,25 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DerivingStrategies #-}
 
-module Pavel.Xnu.Types
-  ( FsId(..)
-  , FsObjId(..)
-  , TextEncoding(..)
-  , DarwinTime(..)
-  , TimeSpec(..)
-  , RawFinderInfo
-  , FileFlags
-  , KauthAce(..)
-  , KauthAcl(..)
-  , KauthFilesec(..)
-  , peekKauthAcl
-  , peekKauthFilesec
-  , FsOpt(..)  -- from CEnums.hs
-  , VType(..)  -- from CEnums.hs
-  , VTagType(..)  -- from CEnums.hs
-  , FileFlag(..)  -- from CEnums.hs
-  ) where
-
 -------------------------------------------------------------------------------
 -- | Types for interfacing with XNU. Only types that are used to prepare the
 -- input, or interpret the output of XNU system calls should appear here.
@@ -43,14 +24,37 @@ module Pavel.Xnu.Types
 -- 'System.Posix.Types' and other standard libraries.
 -------------------------------------------------------------------------------
 
+module Pavel.Xnu.Types
+  ( FsId(..)
+  , FsObjId(..)
+  , TextEncoding(..)
+  , DarwinTime(..)
+  , TimeSpec(..)
+  , RawFinderInfo
+  , FileFlags
+  , Guid(..)
+  , KauthAce(..)
+  , KauthAcl(..)
+  , KauthFilesec(..)
+  , peekKauthAcl
+  , peekKauthFilesec
+  -- | * Reëxported from CEnums.hs
+  , FsOpt(..)
+  , VType(..)
+  , VTagType(..)
+  , FileFlag(..)
+  ) where
+
 import Control.Monad
-import Data.Bits
-import qualified Data.ByteString as BS
+import Data.Char
+import qualified Data.ByteString.Char8 as BS
 import Data.Int
+import Data.Hex
 import Data.Word
 import Foreign.Marshal.Utils
 import Foreign.Ptr
 import Foreign.Storable
+import Numeric
 
 import Pavel.EnumBitFlags
 import Pavel.SafeBuf
@@ -166,7 +170,9 @@ type FileFlags = EnumBitFlags Word32 FileFlag
 -- From @sys/_types/_guid_t.h@.
 newtype Guid =
   Guid BS.ByteString
-  deriving (Read, Show)
+
+instance Show Guid where
+  show (Guid bs) = hex $ BS.unpack bs
 
 instance Storable Guid where
   sizeOf _ = #{const KAUTH_GUID_SIZE}
@@ -178,6 +184,12 @@ instance Storable Guid where
     BS.useAsCStringLen bs $ \(buf, _) -> do
       copyBytes (castPtr ptr) buf #{const KAUTH_GUID_SIZE}
 
+newtype Base2 a = Base2 a
+  deriving newtype (Eq, Ord, Num, Enum, Real, Integral, Storable)
+
+instance (Integral a, Show a) => Show (Base2 a) where
+  showsPrec _ (Base2 x) = (showString "0b") . showIntAtBase 2 intToDigit x
+
 -- | The Kauth* types below come from @sys/kauth.h@ which is marked as
 -- @__APPLE_API_EVOLVING@ (as of 10.14).
 -- There is also a public ACL API at @sys/acl.h@ (TODO) which is probably a
@@ -185,19 +197,17 @@ instance Storable Guid where
 
 -- | @kauth_ace_rights_t@ from @sys/kauth.h@.
 -- TODO: interpret
-newtype KauthAceRights =
-  KauthAceRights #{type kauth_ace_rights_t}
-  deriving newtype (Bits, Eq, Enum, Show, Read, Storable)
+type KauthAceRights = #{type kauth_ace_rights_t}
 
 -- | Access Control List Entry (ACE).
 -- Corresponds to @struct kauth_ace@ from @sys/kauth.h@.
 -- TODO: interpret flags and rights
 data KauthAce = KauthAce
   { ace_applicable :: Guid
-  , ace_flags :: Word32
-  , ace_rights :: KauthAceRights
+  , ace_flags :: Base2 Word32
+  , ace_rights :: Base2 KauthAceRights
   }
-  deriving (Read, Show)
+  deriving (Show)
 
 instance Storable KauthAce where
   sizeOf _ = #{const sizeof(struct kauth_ace)}
@@ -221,7 +231,7 @@ data KauthAcl = KauthAcl
   { acl_flags :: Word32
   , acl_ace :: [KauthAce]
   }
-  deriving (Read, Show)
+  deriving (Show)
 
 -- @struct kauth_acl@ is variable length, so it can't be Storable.
 peekKauthAcl :: (Storable w) => Buf w -> IO (Buf w, KauthAcl)
@@ -240,7 +250,7 @@ data KauthFilesec = KauthFilesec
   , fsec_group :: Guid
   , fsec_acl :: KauthAcl
   }
-  deriving (Read, Show)
+  deriving (Show)
 
 peekKauthFilesec :: (Storable w) => Buf w -> IO (Buf w, KauthFilesec)
 peekKauthFilesec buf@(Buf ptr _) = do

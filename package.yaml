@@ -27,10 +27,13 @@ library:
   default-extensions:
     ScopedTypeVariables
     MultiWayIf
-  ghc-options: -Wall -O
+  ghc-options:
+  - -Wall
+#  - -fllvm -optlc=-O3 -optlo=-O3 -optl=-O3 -O3
   dependencies:
   - base
   - bytestring
+  - hex
 
 executables:
   ttt:
@@ -41,6 +44,6 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     - -Wall
-    - -O
+#    - -fllvm -optlc=-O3 -optlo=-O3 -optl=-O3 -O3
     dependencies:
     - pavel
