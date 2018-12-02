@@ -1,6 +1,4 @@
 {-# LANGUAGE CApiFFI #-}
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -19,16 +17,20 @@
 module Pavel.Xnu.AttrList
   ( Attr(..)
   , FsOpts
+  , findValidArgs
   , getAttrList
   ) where
 
+import Control.Exception
 import Control.Monad
+import Data.Array
 import Data.List
 import Data.Word
 import Foreign
 import Foreign.C.Error
 import Foreign.C.String
 import Foreign.C.Types
+import GHC.IO.Exception
 import System.Posix.Internals
 import System.Posix.Types
 
@@ -77,12 +79,37 @@ data Attr =
   | ATTR_CMN_FULLPATH
   | ATTR_CMN_ADDEDTIME
   | ATTR_CMN_DATA_PROTECT_FLAGS
-  deriving (Bounded, Enum, Eq, Ord, Show)
+  | ATTR_VOL_INFO
+  | ATTR_VOL_FSTYPE
+  | ATTR_VOL_SIGNATURE
+  | ATTR_VOL_SIZE
+  | ATTR_VOL_SPACEFREE
+  | ATTR_VOL_SPACEAVAIL
+  | ATTR_VOL_MINALLOCATION
+  | ATTR_VOL_ALLOCATIONCLUMP
+  | ATTR_VOL_IOBLOCKSIZE
+  | ATTR_VOL_OBJCOUNT
+  | ATTR_VOL_FILECOUNT
+  | ATTR_VOL_DIRCOUNT
+  | ATTR_VOL_MAXOBJCOUNT
+  | ATTR_VOL_MOUNTPOINT
+  | ATTR_VOL_NAME
+  | ATTR_VOL_MOUNTFLAGS
+  | ATTR_VOL_MOUNTEDDEVICE
+  | ATTR_VOL_ENCODINGSUSED
+--  | ATTR_VOL_CAPABILITIES
+  | ATTR_VOL_UUID
+  | ATTR_VOL_QUOTA_SIZE
+  | ATTR_VOL_RESERVED_SIZE
+--  | ATTR_VOL_ATTRIBUTES
+  deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
 -- | Attribute value data type.
 
 data AttrValue
-  = AttrCmnReturnedAttrs AttributeSet
+  = AttrVoid
+  -- * Common attributes.
+  | AttrCmnReturnedAttrs AttributeSet
   | AttrCmnName String
   | AttrCmnDevId CDev
   | AttrCmnFsId FsId
@@ -113,6 +140,29 @@ data AttrValue
   | AttrCmnFullPath String
   | AttrCmnAddedTime TimeSpec
   | AttrCmnDataProtectFlags Word32
+  -- * Volume attributes.
+  | AttrVolFsType Word32
+  | AttrVolSignature Word32
+  | AttrVolSize COff
+  | AttrVolSpaceFree COff
+  | AttrVolSpaceAvail COff
+  | AttrVolMinAllocation COff
+  | AttrVolAllocationClump COff
+  | AttrVolIoBlockSize Word32
+  | AttrVolObjCount Word32
+  | AttrVolFileCount Word32
+  | AttrVolDirCount Word32
+  | AttrVolMaxObjCount Word32
+  | AttrVolMountPoint String
+  | AttrVolName String
+  | AttrVolMountFlags Word32
+  | AttrVolMountedDevice String
+  | AttrVolEncodingsUsed #{type unsigned long long}
+--  | AttrVolCapabilities VolCapabilities
+  | AttrVolUuid Guid
+  | AttrVolQuotaSize COff
+  | AttrVolReservedSize COff
+--  | AttrVolAttributes VolAttributes
   deriving (Show)
 
 -- All objects in attrlist buffer are aligned to 4 bytes.
@@ -132,6 +182,7 @@ data AttrKind =
   | AttrFile
   | AttrFork
   | AttrExtCmn
+  deriving (Eq)
 
 type AttrBitRep = Word32
 
@@ -162,9 +213,22 @@ fixedAttr kind bitRep constr =
 attrReferenceSize :: Int
 attrReferenceSize = alignedSize #{size struct attrreference}
 
+alignedNameMax :: Int
+alignedNameMax = alignedSize (3 * #{const NAME_MAX} + 1)
+
+alignedPathMax :: Int
+alignedPathMax = alignedSize (3 * #{const PATH_MAX} + 1)
+
+-- The same as PATH_MAX, but @/usr/include@ uses both...
+alignedMaxPathLen :: Int
+alignedMaxPathLen = alignedSize (3 * #{const MAXPATHLEN} + 1)
+
 -- | Mapping between Attr enum and meta info required to peek attributes
 -- from the buffer.
 attrConf :: Attr -> AttrConf
+--
+-- Common Attrs
+--
 attrConf ATTR_CMN_RETURNED_ATTRS =
   ( AttrCmn
   , #{const ATTR_CMN_RETURNED_ATTRS}
@@ -174,7 +238,7 @@ attrConf ATTR_CMN_RETURNED_ATTRS =
 attrConf ATTR_CMN_NAME =
   ( AttrCmn
   , #{const ATTR_CMN_NAME}
-  , attrReferenceSize + alignedSize (3 * #{const NAME_MAX} + 1)
+  , attrReferenceSize + alignedNameMax
   , peekStringAttr AttrCmnName
   )
 attrConf ATTR_CMN_DEVID =
@@ -248,7 +312,7 @@ attrConf ATTR_CMN_PARENTID =
 attrConf ATTR_CMN_FULLPATH =
   ( AttrCmn
   , #{const ATTR_CMN_FULLPATH}
-  , attrReferenceSize + alignedSize (3 * #{const PATH_MAX} + 1)
+  , attrReferenceSize + alignedPathMax
   , peekStringAttr AttrCmnFullPath
   )
 attrConf ATTR_CMN_ADDEDTIME =
@@ -258,6 +322,72 @@ attrConf ATTR_CMN_DATA_PROTECT_FLAGS =
     AttrCmn
     #{const ATTR_CMN_DATA_PROTECT_FLAGS}
     AttrCmnDataProtectFlags
+--
+-- Volume attrs
+--
+attrConf ATTR_VOL_INFO =
+  ( AttrVol
+  , #{const ATTR_VOL_INFO}
+  , 0
+  , (\buf -> return (buf, AttrVoid))
+  )
+attrConf ATTR_VOL_FSTYPE =
+  fixedAttr AttrVol #{const ATTR_VOL_FSTYPE} AttrVolFsType
+attrConf ATTR_VOL_SIGNATURE =
+  fixedAttr AttrVol #{const ATTR_VOL_SIGNATURE} AttrVolSignature
+attrConf ATTR_VOL_SIZE =
+  fixedAttr AttrVol #{const ATTR_VOL_SIZE} AttrVolSize
+attrConf ATTR_VOL_SPACEFREE =
+  fixedAttr AttrVol #{const ATTR_VOL_SPACEFREE} AttrVolSpaceFree
+attrConf ATTR_VOL_SPACEAVAIL =
+  fixedAttr AttrVol #{const ATTR_VOL_SPACEAVAIL} AttrVolSpaceAvail
+attrConf ATTR_VOL_MINALLOCATION =
+  fixedAttr AttrVol #{const ATTR_VOL_MINALLOCATION} AttrVolMinAllocation
+attrConf ATTR_VOL_ALLOCATIONCLUMP =
+  fixedAttr AttrVol #{const ATTR_VOL_ALLOCATIONCLUMP} AttrVolAllocationClump
+attrConf ATTR_VOL_IOBLOCKSIZE =
+  fixedAttr AttrVol #{const ATTR_VOL_IOBLOCKSIZE} AttrVolIoBlockSize
+attrConf ATTR_VOL_OBJCOUNT =
+  fixedAttr AttrVol #{const ATTR_VOL_OBJCOUNT} AttrVolObjCount
+attrConf ATTR_VOL_FILECOUNT =
+  fixedAttr AttrVol #{const ATTR_VOL_FILECOUNT} AttrVolFileCount
+attrConf ATTR_VOL_DIRCOUNT =
+  fixedAttr AttrVol #{const ATTR_VOL_DIRCOUNT} AttrVolDirCount
+attrConf ATTR_VOL_MAXOBJCOUNT =
+  fixedAttr AttrVol #{const ATTR_VOL_MAXOBJCOUNT} AttrVolMaxObjCount
+attrConf ATTR_VOL_MOUNTPOINT =
+  ( AttrVol
+  , #{const ATTR_VOL_MOUNTPOINT}
+  , attrReferenceSize + alignedMaxPathLen
+  , peekStringAttr AttrVolMountPoint
+  )
+attrConf ATTR_VOL_NAME =
+  ( AttrVol
+  , #{const ATTR_VOL_NAME}
+  , attrReferenceSize + alignedNameMax
+  , peekStringAttr AttrVolName
+  )
+attrConf ATTR_VOL_MOUNTFLAGS =
+  fixedAttr AttrVol #{const ATTR_VOL_MOUNTFLAGS} AttrVolMountFlags
+attrConf ATTR_VOL_MOUNTEDDEVICE =
+  ( AttrVol
+  , #{const ATTR_VOL_MOUNTEDDEVICE}
+  , attrReferenceSize + alignedMaxPathLen
+  , peekStringAttr AttrVolMountedDevice
+  )
+attrConf ATTR_VOL_ENCODINGSUSED =
+  fixedAttr AttrVol #{const ATTR_VOL_ENCODINGSUSED} AttrVolEncodingsUsed
+--attrConf ATTR_VOL_CAPABILITIES =
+--  fixedAttr AttrVol #{const ATTR_VOL_CAPABILITIES} AttrVolCapabilities
+attrConf ATTR_VOL_UUID =
+  fixedAttr AttrVol #{const ATTR_VOL_UUID} AttrVolUuid
+attrConf ATTR_VOL_QUOTA_SIZE =
+  fixedAttr AttrVol #{const ATTR_VOL_QUOTA_SIZE} AttrVolQuotaSize
+attrConf ATTR_VOL_RESERVED_SIZE =
+  fixedAttr AttrVol #{const ATTR_VOL_RESERVED_SIZE} AttrVolReservedSize
+--attrConf ATTR_VOL_ATTRIBUTES =
+--  fixedAttr AttrVol #{const ATTR_VOL_ATTRIBUTES} AttrVolAttributes
+
 attrConf attr = error ("attr " ++ (show attr) ++ " not supported yet")
 
 type AttrConfList = [(Attr, AttrConf)]
@@ -265,7 +395,18 @@ type AttrConfList = [(Attr, AttrConf)]
 attrConfList :: AttrConfList
 attrConfList = [(attr, attrConf attr) | attr <- [minBound..]]
 
-cmnBitReps = [(attr, bitrep) | (attr, (AttrCmn, bitrep, _, _)) <- attrConfList]
+attrBitReps :: AttrKind -> [(Attr, AttrBitRep)]
+attrBitReps kind =
+  [(attr, bitrep) | (attr, (k, bitrep, _, _)) <- attrConfList, k == kind]
+
+-- | Map from attr bit to Attr for fast lookup.
+type AttrArray = Array Int Attr
+
+attrArray :: AttrKind -> Array Int Attr
+attrArray kind =
+  array
+    (0, finiteBitSize (undefined :: AttrBitRep) - 1)
+    [(countTrailingZeros bitrep, attr) | (attr, bitrep) <- attrBitReps kind]
 
 -------------------------------------------------------------------------------
 -- Peek functions.
@@ -278,11 +419,40 @@ newtype AttributeSet = AttributeSet [Attr] deriving newtype (Show)
 peekAttributeSet :: Bool -> AttrListBuf -> IO (AttrListBuf, AttributeSet)
 peekAttributeSet cmnExt buf@(Buf ptr _) = do
   buf' <- safeAdvance buf #{size attribute_set_t}
-  (commonattr :: Word32) <-
+  (commonattr :: AttrBitRep) <-
     #{peek attribute_set_t, commonattr} (castPtr ptr)
-  let lst =
-        [attr | (attr, br) <- cmnBitReps, br .&. commonattr /= (toEnum 0)]
-   in return (buf', AttributeSet lst)
+  (volattr :: AttrBitRep) <-
+    #{peek attribute_set_t, volattr} (castPtr ptr)
+  let lst = concatMap
+              lstForKind
+              [ (commonattr, AttrCmn)
+              , (volattr, AttrVol)
+              ]
+ --          sort $ collectBits [] commonattr (attrArray AttrCmn)
+   in do
+        -- putStrLn ("attribute_set " ++ (show lst))
+        return (buf', AttributeSet lst)
+  where
+    lstForKind (w, kind) =
+      [attr | (attr, bitrep) <- attrBitReps kind, bitrep .&. w /= (toEnum 0)]
+
+{-
+  -- This approach doesn't save us anything as we still need to sort the list
+  -- (or rely on the implicit order, which is bad).
+  where
+    collectBits :: [Attr] -> AttrBitRep -> (Array Int Attr) -> [Attr]
+    collectBits lst 0 _ = lst
+    collectBits lst w arr =
+      go (countTrailingZeros w)
+      where
+        lastBit = finiteBitSize (undefined :: AttrBitRep) - 1
+        go :: Int -> [Attr]
+        go !ind =
+          if ind == lastBit
+            then (arr ! lastBit) : lst
+            else (arr ! ind) :
+                   go (ind + 1 + countTrailingZeros (shiftR w (1 + ind)))
+-}
 
 -- | Peek something and wrap it in an AttrValue constructor.
 peekFixedAttr ::
@@ -322,10 +492,13 @@ peekAttrReference buf@(Buf ptr size) = do
 -- | Peek a NUL-terminated string referenced by @attreference@ and wrap it
 -- into the provided constructor. The terminating NUL character is removed.
 peekStringAttr :: (String -> a) -> AttrListBuf -> IO (AttrListBuf, a)
-peekStringAttr valueConstr buf = do
-  (buf', Buf strPtr strLen) <- peekAttrReference buf
-  str <- peekCStringLen (castPtr strPtr, strLen - 1)
-  return (buf', valueConstr str)
+peekStringAttr valueConstr buf =
+  peekAttrReference buf >>= \case
+    (buf', Buf _ 0) ->
+      return (buf', valueConstr "")
+    (buf', Buf strPtr strLen) -> do
+      str <- peekCStringLen (castPtr strPtr, strLen - 1)
+      return (buf', valueConstr str)
 
 -- | Peek a variable size @struct kauth_filesec@ and keep only the acl part.
 -- Note, that if the extended security is missing, the @attrreference@
@@ -345,11 +518,11 @@ peekKauthAclAttr valueConstr buf = do
 peekAttrs :: [Attr] -> AttrListBuf -> IO [AttrValue]
 peekAttrs attrs buf =
   case attrs of
-    ATTR_CMN_RETURNED_ATTRS : rest -> do
+    ATTR_CMN_RETURNED_ATTRS : _ -> do
       (buf', attrSet@(AttributeSet attrs')) <-
         peekAttributeSet True buf
-      putStrLn (show attrs')
-      putStrLn (show [attr | attr <- attrs, not (attr `elem` attrs')])
+--      putStrLn (show attrs')
+--      putStrLn (show [attr | attr <- attrs, not (attr `elem` attrs')])
       (AttrCmnReturnedAttrs attrSet:) <$> go buf' (tail attrs')
     _ ->
       go buf attrs
@@ -378,14 +551,25 @@ instance Storable AttrList where
   poke ptr (AttrList attrs) = do
     #{poke struct attrlist, bitmapcount} ptr $
       (#{const ATTR_BIT_MAP_COUNT} :: Word32)
-    #{poke struct attrlist, commonattr} ptr $
-      foldr (.|.) 0 [bitRep | (AttrCmn, bitRep, _, _) <- map attrConf attrs]
-    #{poke struct attrlist, volattr} ptr $ (0 :: Word32)
+--    putStrLn ("commonattr " ++ (show $ Base2 (getField AttrCmn)))
+    #{poke struct attrlist, commonattr} ptr $ getField AttrCmn
+--    putStrLn ("volattr " ++ (show $ Base2 ((getField AttrVol) .|. #{const ATTR_VOL_INFO})))
+    #{poke struct attrlist, volattr} ptr $ getField AttrVol
+--      if (getField AttrVol) /= 0
+--        then (getField AttrVol) .|. #{const ATTR_VOL_INFO}
+--        else 0
     #{poke struct attrlist, dirattr} ptr $ (0 :: Word32)
     #{poke struct attrlist, fileattr} ptr $ (0 :: Word32)
     #{poke struct attrlist, forkattr} ptr $ (0 :: Word32)
+    where
+      getField kind =
+        foldr (.|.) 0 [bitRep | (k, bitRep, _, _) <- map attrConf attrs,
+                                k == kind]
   peek _ = error "do not need yet"
 
+calcBufSize :: [Attr] -> Int
+calcBufSize attrs =
+  foldr (+) 0 [size | (_, _, size, _) <- map attrConf attrs]
 
 withAttrList :: AttrList -> (Ptr AttrList -> IO a) -> IO a
 withAttrList attrList f =
@@ -403,12 +587,52 @@ foreign import capi unsafe "unistd.h getattrlist" c_getattrlist ::
 
 type FsOpts = EnumBitFlags CULong FsOpt
 
+findValidArgs :: [FsOpt] -> [Attr] -> FilePath -> IO ([Attr], [Attr])
+findValidArgs opts0 attrs0 path =
+  go opts0 [minBound..maxBound] [] []
+  where
+  go opts attrs delAttrs tryAttrs =
+    tryThis opts (tryAttrs ++ attrs0) >>= \case
+      True ->
+        case attrs of
+          ha : ta ->
+            go opts ta delAttrs (ha : tryAttrs)
+          _ -> return $ (reverse tryAttrs, reverse delAttrs)
+      False ->
+        case (attrs, tryAttrs) of
+           (ha : ta, ht : tt) ->
+             go opts ta (ht : delAttrs) (ha : tt)
+           (ha : ta, []) ->
+             go opts ta delAttrs [ha]
+           ([], ht : tt) ->
+             return $ (reverse tt, reverse $ ht : delAttrs)
+           _ -> return ([], reverse delAttrs)
+  tryThis opts attrs =
+    catch
+      (do
+--        putStrLn ("Trying " ++ (show opts) ++ " " ++ (show attrs))
+        _ <- getAttrList opts attrs path
+--        putStrLn ("Success " ++ (show opts) ++ " " ++ (show attrs))
+        return True)
+      (\(e :: IOError) -> do
+--         putStrLn ("Failure " ++ (show opts) ++ " " ++ (show attrs))
+         case ioe_type e of
+           InvalidArgument -> return False
+           UnsupportedOperation -> return False
+           _ -> throw e)
+
 -- | Make @getattrlist@ system call, and return interpreted results.
-getAttrList :: FsOpts -> [Attr] -> FilePath -> IO [AttrValue]
+--
+-- @ATTR_CMN_GEN_COUNT@ invalid vol
+-- @ATTR_CMN_DOCUMENT_ID@ invalid vol
+-- @ATTR_CMN_FULLPATH@ invalid vol
+-- @ATTR_CMN_ADDEDTIME@ invalid vol
+-- @ATTR_CMN_DATA_PROTECT_FLAGS@ invalid vol
+getAttrList :: [FsOpt] -> [Attr] -> FilePath -> IO [AttrValue]
 getAttrList opts attrs path =
   withFilePath path $ \cPath -> do
     withAttrList (AttrList attrs) $ \pAttrList -> do
-      result <- go cPath pAttrList 8
+      result <- go cPath pAttrList (calcBufSize attrs)
       case result of
         Left size -> do
           result' <- go cPath pAttrList size
@@ -424,7 +648,12 @@ getAttrList opts attrs path =
           "getAttrList"
           path
           (c_getattrlist
-            cPath pAttrList pAttrBuf (toEnum bufSize) (packEnumBitFlags opts))
+            cPath
+            pAttrList
+            pAttrBuf
+            (toEnum bufSize)
+            (((packEnumBitFlags (EnumBitFlags opts)) :: CULong) .|.
+              #{const FSOPT_REPORT_FULLSIZE}))
         (size :: Int) <-
           (fromIntegral <$> peek ((castPtr pAttrBuf) :: Ptr Word32))
         if size > bufSize

@@ -23,10 +23,21 @@ dependencies:
 - base >= 4.7 && < 5
 
 library:
-  source-dirs: .
+#  source-dirs: .
   default-extensions:
     ScopedTypeVariables
     MultiWayIf
+    DerivingStrategies
+    GeneralizedNewtypeDeriving
+    LambdaCase
+  exposed-modules:
+    Pavel.Xnu.AttrList
+    Pavel.Xnu.Types
+    Pavel.EnumBitFlags
+  other-modules:
+    Pavel.SafeBuf
+    Pavel.Xnu.AttrList.CEnums
+    Pavel.Xnu.Types.CEnums
   ghc-options:
   - -Wall
 #  - -fllvm -optlc=-O3 -optlo=-O3 -optl=-O3 -O3
@@ -34,6 +45,7 @@ library:
   - base
   - bytestring
   - hex
+  - array
 
 executables:
   ttt:
@@ -47,3 +59,4 @@ executables:
 #    - -fllvm -optlc=-O3 -optlo=-O3 -optl=-O3 -O3
     dependencies:
     - pavel
+    - text

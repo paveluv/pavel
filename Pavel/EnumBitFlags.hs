@@ -1,3 +1,6 @@
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 module Pavel.EnumBitFlags where
 
 import Data.Bits
@@ -25,7 +28,7 @@ import Foreign.Storable
 -- > type SomeEnumFlags = EnumBitFlags Word32 SomeEnum
 newtype EnumBitFlags w a =
   EnumBitFlags [a]
-  deriving (Read, Show)
+  deriving newtype (Read, Show)
 
 instance Foldable (EnumBitFlags w) where
   foldr func acc (EnumBitFlags flags) = foldr func acc flags

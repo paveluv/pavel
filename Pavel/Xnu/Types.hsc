@@ -1,6 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DerivingStrategies #-}
-
 -------------------------------------------------------------------------------
 -- | Types for interfacing with XNU. Only types that are used to prepare the
 -- input, or interpret the output of XNU system calls should appear here.
@@ -25,7 +22,8 @@
 -------------------------------------------------------------------------------
 
 module Pavel.Xnu.Types
-  ( FsId(..)
+  ( Base2(..)
+  , FsId(..)
   , FsObjId(..)
   , TextEncoding(..)
   , DarwinTime(..)
@@ -51,6 +49,7 @@ import qualified Data.ByteString.Char8 as BS
 import Data.Int
 import Data.Hex
 import Data.Word
+import Foreign.C.String
 import Foreign.Marshal.Utils
 import Foreign.Ptr
 import Foreign.Storable
@@ -164,25 +163,25 @@ instance Storable RawFinderInfo where
 
 -- | File flags are returned in @st_flags@ field by @stat@ and for
 -- @ATTR_CMN_FLAGS@ attr by @getAttrList@.
-type FileFlags = EnumBitFlags Word32 FileFlag
+newtype FileFlags = FileFlags (EnumBitFlags Word32 FileFlag)
+  deriving newtype (Show, Storable)
 
--- | Apple-style globally unique identifier.
--- From @sys/_types/_guid_t.h@.
+-- | 16 byte globally unique identifier.
+--
 newtype Guid =
-  Guid BS.ByteString
+  Guid String
 
 instance Show Guid where
-  show (Guid bs) = hex $ BS.unpack bs
+  show (Guid s) = hex s
 
 instance Storable Guid where
-  sizeOf _ = #{const KAUTH_GUID_SIZE}
-  alignment _ = 4
+  sizeOf _ = 16
+  alignment _ = 1
   peek ptr =
-    Guid <$>
-    BS.packCStringLen ((castPtr ptr), #{const KAUTH_GUID_SIZE})
-  poke ptr (Guid bs) =
-    BS.useAsCStringLen bs $ \(buf, _) -> do
-      copyBytes (castPtr ptr) buf #{const KAUTH_GUID_SIZE}
+    Guid <$> peekCStringLen ((castPtr ptr), 16)
+  poke ptr (Guid s) =
+    withCStringLen s $ \(sPtr, _) -> do
+      copyBytes (castPtr ptr) sPtr 16
 
 newtype Base2 a = Base2 a
   deriving newtype (Eq, Ord, Num, Enum, Real, Integral, Storable)
