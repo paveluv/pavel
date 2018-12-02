@@ -481,13 +481,14 @@ peekEnumAttr _ valueConstr buf = do
 -- points to. The original buffer is advanced to the next entry.
 peekAttrReference :: AttrListBuf -> IO (AttrListBuf, AttrListBuf)
 peekAttrReference buf@(Buf ptr size) = do
-  (buf', off :: Int32) <- safePeek buf
-  (buf'', len :: Word32) <- safePeek buf'
+  buf' <- safeAdvance buf #{size struct attrreference}
+  (off :: Int32) <- #{peek attrreference_t, attr_dataoffset} ptr
+  (len :: Word32) <- #{peek attrreference_t, attr_length} ptr
   let iOff = fromEnum off
       iLen = fromEnum len
    in if iOff + iLen > size
         then error "attrreference out of buffer"
-        else return (buf'', Buf (ptr `plusPtr` iOff) iLen)
+        else return (buf', Buf (ptr `plusPtr` iOff) iLen)
 
 -- | Peek a NUL-terminated string referenced by @attreference@ and wrap it
 -- into the provided constructor. The terminating NUL character is removed.
@@ -536,6 +537,44 @@ peekAttrs attrs buf =
            in do
                 (buf''', value) <- fn buf''
                 return (buf''', value : retAcc)
+
+-------------------------------------------------------------------------------
+-- Valid args finder.
+-------------------------------------------------------------------------------
+
+findValidArgs :: [FsOpt] -> [Attr] -> FilePath -> IO ([Attr], [Attr])
+findValidArgs opts0 attrs0 path =
+  go opts0 [minBound..maxBound] [] []
+  where
+  go opts attrs delAttrs tryAttrs =
+    tryThis opts (tryAttrs ++ attrs0) >>= \case
+      True ->
+        case attrs of
+          ha : ta ->
+            go opts ta delAttrs (ha : tryAttrs)
+          _ -> return $ (reverse tryAttrs, reverse delAttrs)
+      False ->
+        case (attrs, tryAttrs) of
+           (ha : ta, ht : tt) ->
+             go opts ta (ht : delAttrs) (ha : tt)
+           (ha : ta, []) ->
+             go opts ta delAttrs [ha]
+           ([], ht : tt) ->
+             return $ (reverse tt, reverse $ ht : delAttrs)
+           _ -> return ([], reverse delAttrs)
+  tryThis opts attrs =
+    catch
+      (do
+--        putStrLn ("Trying " ++ (show opts) ++ " " ++ (show attrs))
+        _ <- getAttrList opts attrs path
+--        putStrLn ("Success " ++ (show opts) ++ " " ++ (show attrs))
+        return True)
+      (\(e :: IOError) -> do
+--         putStrLn ("Failure " ++ (show opts) ++ " " ++ (show attrs))
+         case ioe_type e of
+           InvalidArgument -> return False
+           UnsupportedOperation -> return False
+           _ -> throw e)
 
 -------------------------------------------------------------------------------
 -- System call wrappers.
@@ -587,47 +626,7 @@ foreign import capi unsafe "unistd.h getattrlist" c_getattrlist ::
 
 type FsOpts = EnumBitFlags CULong FsOpt
 
-findValidArgs :: [FsOpt] -> [Attr] -> FilePath -> IO ([Attr], [Attr])
-findValidArgs opts0 attrs0 path =
-  go opts0 [minBound..maxBound] [] []
-  where
-  go opts attrs delAttrs tryAttrs =
-    tryThis opts (tryAttrs ++ attrs0) >>= \case
-      True ->
-        case attrs of
-          ha : ta ->
-            go opts ta delAttrs (ha : tryAttrs)
-          _ -> return $ (reverse tryAttrs, reverse delAttrs)
-      False ->
-        case (attrs, tryAttrs) of
-           (ha : ta, ht : tt) ->
-             go opts ta (ht : delAttrs) (ha : tt)
-           (ha : ta, []) ->
-             go opts ta delAttrs [ha]
-           ([], ht : tt) ->
-             return $ (reverse tt, reverse $ ht : delAttrs)
-           _ -> return ([], reverse delAttrs)
-  tryThis opts attrs =
-    catch
-      (do
---        putStrLn ("Trying " ++ (show opts) ++ " " ++ (show attrs))
-        _ <- getAttrList opts attrs path
---        putStrLn ("Success " ++ (show opts) ++ " " ++ (show attrs))
-        return True)
-      (\(e :: IOError) -> do
---         putStrLn ("Failure " ++ (show opts) ++ " " ++ (show attrs))
-         case ioe_type e of
-           InvalidArgument -> return False
-           UnsupportedOperation -> return False
-           _ -> throw e)
-
 -- | Make @getattrlist@ system call, and return interpreted results.
---
--- @ATTR_CMN_GEN_COUNT@ invalid vol
--- @ATTR_CMN_DOCUMENT_ID@ invalid vol
--- @ATTR_CMN_FULLPATH@ invalid vol
--- @ATTR_CMN_ADDEDTIME@ invalid vol
--- @ATTR_CMN_DATA_PROTECT_FLAGS@ invalid vol
 getAttrList :: [FsOpt] -> [Attr] -> FilePath -> IO [AttrValue]
 getAttrList opts attrs path =
   withFilePath path $ \cPath -> do
